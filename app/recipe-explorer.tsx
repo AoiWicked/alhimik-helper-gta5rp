@@ -18,6 +18,12 @@ export type Recipe = {
 };
 
 type PathStep = Recipe & { depth: number };
+type TimePlanStep = Recipe & { unlockedCount: number };
+type ScanMatch = {
+  name: string;
+  confidence: number;
+  recognizedAs: string;
+};
 
 const BASE_ELEMENTS = ["Земля", "Пламя", "Воздух", "Вода"];
 
@@ -89,6 +95,66 @@ function buildPath(target: string, recipes: Recipe[]): PathStep[] {
   return steps;
 }
 
+function buildTimePlan(openedElements: string[], recipes: Recipe[]): TimePlanStep[] {
+  const known = new Map<string, string>();
+  for (const element of [...BASE_ELEMENTS, ...openedElements]) {
+    known.set(normalize(element), element);
+  }
+
+  const steps: TimePlanStep[] = [];
+  let madeProgress = true;
+
+  while (known.size < 100 && madeProgress) {
+    madeProgress = false;
+
+    for (const recipe of recipes) {
+      if (recipe.ingredients.length === 0 || known.has(normalize(recipe.result))) continue;
+      const canCreate = recipe.ingredients.every((ingredient) =>
+        known.has(normalize(ingredient)),
+      );
+      if (!canCreate) continue;
+
+      known.set(normalize(recipe.result), recipe.result);
+      steps.push({ ...recipe, unlockedCount: known.size });
+      madeProgress = true;
+      if (known.size >= 100) break;
+    }
+  }
+
+  return steps;
+}
+
+function prepareScreenshot(file: File): Promise<{ dataUrl: string; preview: string }> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    image.onload = () => {
+      const maxSide = 1800;
+      const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      const context = canvas.getContext("2d");
+      if (!context) {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error("Браузер не смог обработать изображение"));
+        return;
+      }
+
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.86);
+      URL.revokeObjectURL(objectUrl);
+      resolve({ dataUrl, preview: dataUrl });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Не удалось открыть изображение"));
+    };
+    image.src = objectUrl;
+  });
+}
+
 function SearchIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -116,13 +182,29 @@ function BookIcon() {
   );
 }
 
+function UploadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" />
+      <path d="M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14" />
+    </svg>
+  );
+}
+
 export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
+  const [mode, setMode] = useState<"recipe" | "time">("recipe");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [catalogQuery, setCatalogQuery] = useState("");
+  const [scanMatches, setScanMatches] = useState<ScanMatch[]>([]);
+  const [scanReady, setScanReady] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [screenshot, setScreenshot] = useState("");
   const controlsRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const elements = useMemo(() => {
     const unique = new Map<string, string>();
@@ -156,6 +238,19 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
     [recipes, selected],
   );
 
+  const openedElements = useMemo(
+    () => scanMatches.map((match) => match.name),
+    [scanMatches],
+  );
+  const openedCount = useMemo(
+    () => new Set([...BASE_ELEMENTS, ...openedElements].map(normalize)).size,
+    [openedElements],
+  );
+  const timePlan = useMemo(
+    () => buildTimePlan(openedElements, recipes),
+    [openedElements, recipes],
+  );
+
   function choose(element: string) {
     setSelected(element);
     setQuery(element);
@@ -166,6 +261,52 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
   function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter" && filtered[0]) choose(filtered[0]);
     if (event.key === "Escape") setSearchOpen(false);
+  }
+
+  async function scanFile(file?: File) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setScanError("Выбери изображение в формате PNG, JPG или WEBP.");
+      return;
+    }
+
+    setScanLoading(true);
+    setScanError("");
+    setScanReady(false);
+
+    try {
+      const prepared = await prepareScreenshot(file);
+      setScreenshot(prepared.preview);
+      const response = await fetch("/api/recognize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: prepared.dataUrl }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Ошибка распознавания");
+
+      setScanMatches(payload.elements ?? []);
+      setScanReady(true);
+    } catch (error) {
+      setScanError(
+        error instanceof Error ? error.message : "Не удалось распознать скриншот",
+      );
+    } finally {
+      setScanLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function removeOpened(name: string) {
+    setScanMatches((matches) => matches.filter((match) => match.name !== name));
+  }
+
+  function addOpened(name: string) {
+    if (!name || openedElements.some((element) => normalize(element) === normalize(name))) return;
+    setScanMatches((matches) => [
+      ...matches,
+      { name, confidence: 1, recognizedAs: "Добавлено вручную" },
+    ]);
   }
 
   useEffect(() => {
@@ -187,12 +328,34 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
           <span className="brand-icon"><FlaskIcon /></span>
           <span>АЛХИМИЧЕСКИЙ СПРАВОЧНИК</span>
         </div>
-        <h1>Найди путь к<br /><em>любому элементу</em></h1>
+        <h1>
+          {mode === "recipe" ? "Найди путь к" : "Открой путь до"}<br />
+          <em>{mode === "recipe" ? "любого элемента" : "самого Времени"}</em>
+        </h1>
         <p className="hero-copy">
-          Выбери нужный элемент — и получи полную цепочку его создания,
-          от четырёх стихий до финального результата.
+          {mode === "recipe"
+            ? "Выбери нужный элемент — и получи полную цепочку его создания, от четырёх стихий до финального результата."
+            : "Загрузи скриншот открытых элементов. Python распознает их и построит подробную лестницу до сотого элемента."}
         </p>
 
+        <div className="mode-switch" role="group" aria-label="Режим справочника">
+          <button
+            className={mode === "recipe" ? "is-active" : ""}
+            type="button"
+            onClick={() => setMode("recipe")}
+          >
+            Найти рецепт
+          </button>
+          <button
+            className={mode === "time" ? "is-active" : ""}
+            type="button"
+            onClick={() => setMode("time")}
+          >
+            Путь до Времени
+          </button>
+        </div>
+
+        {mode === "recipe" ? (
         <div className="finder" ref={controlsRef}>
           <div className="search-wrap">
             <SearchIcon />
@@ -298,6 +461,41 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
             </div>
           )}
         </div>
+        ) : (
+          <div className={`scan-uploader ${scanLoading ? "is-loading" : ""}`}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) => scanFile(event.target.files?.[0])}
+              aria-label="Загрузить скриншот открытых элементов"
+            />
+            <button
+              className="upload-dropzone"
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                scanFile(event.dataTransfer.files[0]);
+              }}
+              disabled={scanLoading}
+            >
+              {screenshot ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={screenshot} alt="Загруженный скриншот" />
+              ) : (
+                <span className="upload-icon"><UploadIcon /></span>
+              )}
+              <span className="upload-copy">
+                <strong>{scanLoading ? "Python распознаёт элементы..." : screenshot ? "Загрузить другой скриншот" : "Загрузить скриншот"}</strong>
+                <small>PNG, JPG или WEBP · изображение обрабатывается внутри приложения</small>
+              </span>
+              <span className="upload-action">{scanLoading ? <i /> : "Выбрать файл"}</span>
+            </button>
+            {scanError && <p className="scan-error">{scanError}</p>}
+          </div>
+        )}
 
         <div className="stats" aria-label="Статистика справочника">
           <span><strong>{elements.length}</strong> элементов</span>
@@ -308,8 +506,126 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
         </div>
       </header>
 
-      <section className={`journey ${selected ? "has-result" : ""}`} aria-live="polite">
-        {!selected ? (
+      <section className={`journey ${selected || scanReady ? "has-result" : ""}`} aria-live="polite">
+        {mode === "time" ? (
+          !scanReady ? (
+            <div className="empty-state scan-empty">
+              <div className="empty-orbit" aria-hidden="true">
+                <span>✦</span>
+                <div><UploadIcon /></div>
+              </div>
+              <span className="eyebrow">СКРИНШОТ ПРОГРЕССА</span>
+              <h2>Покажи, что уже открыто</h2>
+              <p>Python прочитает подписи на скриншоте. После загрузки ты сможешь проверить список перед прохождением.</p>
+            </div>
+          ) : (
+            <div className="path-content time-path">
+              <div className="scan-summary">
+                <div className="scan-preview">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={screenshot} alt="Распознанный скриншот" />
+                  <span>РАСПОЗНАНО PYTHON</span>
+                </div>
+                <div className="scan-details">
+                  <div className="scan-title-row">
+                    <div>
+                      <span className="eyebrow">ТВОЙ ПРОГРЕСС</span>
+                      <h2>{openedCount} из 100 элементов</h2>
+                    </div>
+                    <div className="progress-ring" style={{ "--progress": `${Math.min(openedCount, 100) * 3.6}deg` } as CSSProperties}>
+                      <strong>{Math.min(openedCount, 100)}%</strong>
+                    </div>
+                  </div>
+                  <div className="progress-track"><span style={{ width: `${Math.min(openedCount, 100)}%` }} /></div>
+                  <p className="base-note">Четыре базовые стихии учитываются автоматически.</p>
+                  <div className="recognized-list">
+                    {scanMatches.length ? scanMatches.map((match) => (
+                      <span
+                        className={match.confidence < 0.72 ? "is-uncertain" : ""}
+                        key={match.name}
+                        title={`Распознано как «${match.recognizedAs}» · ${Math.round(match.confidence * 100)}%`}
+                      >
+                        {match.name}
+                        <button type="button" onClick={() => removeOpened(match.name)} aria-label={`Убрать ${match.name}`}>×</button>
+                      </span>
+                    )) : <em>Подписи не найдены — добавь открытые элементы вручную.</em>}
+                  </div>
+                  <label className="add-opened">
+                    <span>Не хватает элемента?</span>
+                    <select value="" onChange={(event) => addOpened(event.target.value)}>
+                      <option value="">+ Добавить вручную</option>
+                      {elements
+                        .filter((element) => !openedElements.some((opened) => normalize(opened) === normalize(element)))
+                        .map((element) => <option key={element} value={element}>{element}</option>)}
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <div className="path-heading time-heading">
+                <div>
+                  <span className="eyebrow">ЛЕСТНИЦА ДО ВРЕМЕНИ</span>
+                  <h2>{timePlan.length ? `Осталось создать ${timePlan.length}` : "Условие уже выполнено"}</h2>
+                  <p>Выполняй комбинации сверху вниз — каждый результат сразу участвует в следующих шагах.</p>
+                </div>
+                <div className="steps-total"><strong>{timePlan.length}</strong><span>рецептов</span></div>
+              </div>
+
+              <div className="ladder time-ladder">
+                {timePlan.map((step, index) => {
+                  const offset = timePlan.length === 1 ? 0 : (index / (timePlan.length - 1)) * 35;
+                  const style = { "--step-offset": `${offset}vw` } as CSSProperties;
+                  return (
+                    <article className="recipe-step" style={style} key={`time-${step.id}`}>
+                      <div className="step-marker"><span>{String(index + 1).padStart(2, "0")}</span></div>
+                      <div className="recipe-card">
+                        <div className="card-meta">
+                          <span>ЭЛЕМЕНТ {step.unlockedCount} / 100</span>
+                          <small>РЕЦЕПТ #{String(step.number).padStart(3, "0")}</small>
+                        </div>
+                        <div className="formula">
+                          <span className="ingredient-chip">{step.ingredients[0]}</span>
+                          <span className="operator">+</span>
+                          <span className="ingredient-chip">{step.ingredients[1]}</span>
+                          <span className="operator equals">=</span>
+                          <strong>{step.result}</strong>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+
+                {openedCount + timePlan.length >= 100 && (
+                  <article className="recipe-step is-final time-unlock" style={{ "--step-offset": "35vw" } as CSSProperties}>
+                    <div className="step-marker"><span>✦</span></div>
+                    <div className="recipe-card">
+                      <div className="card-meta">
+                        <span>АВТОМАТИЧЕСКОЕ ОТКРЫТИЕ</span>
+                        <small>ЭЛЕМЕНТ #101</small>
+                      </div>
+                      <div className="unlock-formula">
+                        <span>После сотого элемента открывается</span>
+                        <strong>Время</strong>
+                        <small>Дополнительная комбинация не нужна</small>
+                      </div>
+                    </div>
+                  </article>
+                )}
+              </div>
+
+              {openedCount + timePlan.length >= 100 && (
+                <div className="finish-card time-finish">
+                  <span className="finish-spark">✦</span>
+                  <div>
+                    <small>ЦЕЛЬ МАРШРУТА</small>
+                    <strong>Время открыто!</strong>
+                  </div>
+                  <span className="finish-spark">✦</span>
+                </div>
+              )}
+            </div>
+          )
+        ) : !selected ? (
           <div className="empty-state">
             <div className="empty-orbit" aria-hidden="true">
               <span>✦</span>
