@@ -37,6 +37,7 @@ type PlayerProfile = {
   id: string;
   name: string;
   completedSteps: number;
+  openedElements: string[];
   createdAt: number;
 };
 
@@ -66,13 +67,18 @@ function getProfilesSnapshot() {
 function parseProfiles(snapshot: string): ProfileStore {
   try {
     const value = JSON.parse(snapshot) as Partial<ProfileStore>;
-    const profiles = Array.isArray(value.profiles)
+    const profiles: PlayerProfile[] = Array.isArray(value.profiles)
       ? value.profiles.filter(
           (profile): profile is PlayerProfile =>
             typeof profile?.id === "string" &&
             typeof profile?.name === "string" &&
             typeof profile?.completedSteps === "number",
-        )
+        ).map((profile) => ({
+          ...profile,
+          openedElements: Array.isArray(profile.openedElements)
+            ? profile.openedElements.filter((element): element is string => typeof element === "string")
+            : [],
+        }))
       : [];
     const activeProfileId = profiles.some((profile) => profile.id === value.activeProfileId)
       ? value.activeProfileId!
@@ -290,13 +296,20 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
   );
   const completedSteps = Math.min(activeProfile?.completedSteps ?? 0, walkthrough.steps.length);
   const hasLearnedTime = walkthrough.timeStepIndex >= 0 && completedSteps > walkthrough.timeStepIndex;
-  const openedElementKeys = useMemo(() => {
+  const progressedElementKeys = useMemo(() => {
     const opened = new Set(BASE_ELEMENTS.map(normalize));
     for (const step of walkthrough.steps.slice(0, completedSteps)) {
       opened.add(normalize(step.result));
     }
     return opened;
   }, [completedSteps, walkthrough.steps]);
+  const openedElementKeys = useMemo(() => {
+    const opened = new Set(progressedElementKeys);
+    for (const element of activeProfile?.openedElements ?? []) {
+      opened.add(normalize(element));
+    }
+    return opened;
+  }, [activeProfile?.openedElements, progressedElementKeys]);
   const completedSearchSteps = path.filter((step) => openedElementKeys.has(normalize(step.result))).length;
   const visibleCompleted = Math.min(completedSteps, visibleSteps.length);
   const progressPercent = visibleSteps.length
@@ -341,6 +354,28 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
     });
   }
 
+  function toggleOpenedElement(element: string) {
+    if (!activeProfile) {
+      setProfileCreatorOpen(true);
+      return;
+    }
+
+    const elementKey = normalize(element);
+    const isManuallyOpened = activeProfile.openedElements.some(
+      (opened) => normalize(opened) === elementKey,
+    );
+    const openedElements = isManuallyOpened
+      ? activeProfile.openedElements.filter((opened) => normalize(opened) !== elementKey)
+      : [...activeProfile.openedElements, element];
+
+    saveProfiles({
+      ...profileStore,
+      profiles: profileStore.profiles.map((profile) =>
+        profile.id === activeProfile.id ? { ...profile, openedElements } : profile,
+      ),
+    });
+  }
+
   function continueWalkthrough() {
     const nextIndex = Math.min(completedSteps, walkthrough.steps.length - 1);
     if (nextIndex >= timeSteps.length && view === "time") setView("all");
@@ -357,7 +392,9 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
     saveProfiles({
       ...profileStore,
       profiles: profileStore.profiles.map((profile) =>
-        profile.id === activeProfile.id ? { ...profile, completedSteps: 0 } : profile,
+        profile.id === activeProfile.id
+          ? { ...profile, completedSteps: 0, openedElements: [] }
+          : profile,
       ),
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -375,6 +412,7 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
       completedSteps: Number.isFinite(legacyProgress)
         ? Math.max(0, Math.min(legacyProgress, walkthrough.steps.length))
         : 0,
+      openedElements: [],
       createdAt: Date.now(),
     };
     saveProfiles({
@@ -497,15 +535,18 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                 {filteredElements.length ? (
                   filteredElements.map((element) => (
                     <button
+                      className={openedElementKeys.has(normalize(element)) ? "is-opened" : ""}
                       type="button"
                       role="option"
                       aria-selected={selected === element}
                       key={element}
                       onClick={() => chooseElement(element)}
                     >
-                      <span className="result-gem" aria-hidden="true" />
+                      <span className="result-gem" aria-hidden="true">
+                        {openedElementKeys.has(normalize(element)) ? "✓" : ""}
+                      </span>
                       <span>{element}</span>
-                      <small>Найти путь</small>
+                      <small>{openedElementKeys.has(normalize(element)) ? "Уже открыто" : "Найти путь"}</small>
                     </button>
                   ))
                 ) : (
@@ -551,8 +592,13 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
               </label>
               <div className="catalog-list">
                 {catalogItems.map((element) => (
-                  <button key={element} type="button" onClick={() => chooseElement(element)}>
-                    <span>{element}</span><span>→</span>
+                  <button
+                    className={openedElementKeys.has(normalize(element)) ? "is-opened" : ""}
+                    key={element}
+                    type="button"
+                    onClick={() => chooseElement(element)}
+                  >
+                    <span>{element}</span><span>{openedElementKeys.has(normalize(element)) ? "✓" : "→"}</span>
                   </button>
                 ))}
               </div>
@@ -647,6 +693,10 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                   const offset = (stairPosition <= 9 ? stairPosition : 18 - stairPosition) / 9 * 35;
                   const isTime = step.ingredients.length === 0;
                   const isFinal = index === path.length - 1;
+                  const isProgressOpened = progressedElementKeys.has(normalize(step.result));
+                  const isManuallyOpened = activeProfile?.openedElements.some(
+                    (element) => normalize(element) === normalize(step.result),
+                  ) ?? false;
                   const isKnown = openedElementKeys.has(normalize(step.result));
                   const style = { "--step-offset": `${offset}vw` } as CSSProperties;
 
@@ -656,7 +706,24 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                       <div className="recipe-card">
                         <div className="card-meta">
                           <span>{isTime ? (hasLearnedTime ? "ВЫ УЖЕ ВЫУЧИЛИ ВРЕМЯ" : "ТОЛЬКО НА 100 УРОВНЕ") : isKnown ? `УЖЕ ОТКРЫТО · ${activeProfile?.name}` : isFinal ? "ФИНАЛЬНЫЙ ШАГ" : `ШАГ ${index + 1}`}</span>
-                          <small>#{String(step.number).padStart(3, "0")}</small>
+                          <div className="card-actions">
+                            <small>#{String(step.number).padStart(3, "0")}</small>
+                            {!isTime && (
+                              <button
+                                className={`search-step-toggle ${isKnown ? "is-checked" : ""}`}
+                                type="button"
+                                onClick={() => toggleOpenedElement(step.result)}
+                                disabled={isProgressOpened && !isManuallyOpened}
+                                aria-pressed={isManuallyOpened}
+                              >
+                                {isManuallyOpened
+                                  ? "✓ Найдено"
+                                  : isProgressOpened
+                                    ? "✓ Открыто в маршруте"
+                                    : "Отметить найденным"}
+                              </button>
+                            )}
+                          </div>
                         </div>
                         {isTime ? (
                           <div className="unlock-formula">

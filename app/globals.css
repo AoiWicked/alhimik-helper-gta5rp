@@ -120,8 +120,12 @@ button { color: inherit; }
 .search-results button:last-child { border-bottom: 0; }
 .search-results button:hover { background: #f4e9d8; }
 .search-results small { color: #9a8d7b; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.search-results button.is-opened { background: #f0f1e4; color: #596143; }
+.search-results button.is-opened:hover { background: #e7ead5; }
+.search-results button.is-opened small { color: #68704f; font-weight: 800; }
 .search-results p { margin: 13px; color: var(--muted); font-size: 13px; }
-.result-gem { width: 9px; height: 9px; border: 1px solid var(--rust); transform: rotate(45deg); }
+.result-gem { width: 9px; height: 9px; display: grid; place-items: center; border: 1px solid var(--rust); transform: rotate(45deg); }
+.is-opened .result-gem { width: 14px; height: 14px; border-color: #788260; border-radius: 50%; background: #788260; color: #fff; font-size: 8px; transform: none; }
 .catalog-panel { right: 0; width: min(500px, calc(100vw - 48px)); padding: 18px; }
 .catalog-heading { margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; }
 .catalog-heading div { display: flex; flex-direction: column; gap: 4px; }
@@ -136,6 +140,9 @@ button { color: inherit; }
 .catalog-list button { min-height: 38px; padding: 7px 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; border-bottom: 1px solid #eee5d7; background: transparent; cursor: pointer; text-align: left; font-size: 12px; }
 .catalog-list button span:last-child { color: var(--rust); }
 .catalog-list button:hover { color: var(--rust); background: #f4e9d8; }
+.catalog-list button.is-opened { background: #f0f1e4; color: #596143; }
+.catalog-list button.is-opened span:last-child { color: #68704f; font-weight: 800; }
+.catalog-list button.is-opened:hover { background: #e7ead5; color: #596143; }
 .extra-routes-heading { margin-top: 25px; color: #958875; font-size: 8px; font-weight: 800; letter-spacing: .18em; }
 
 .route-switch { width: min(730px, 100%); margin-top: 9px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -239,6 +246,10 @@ button { color: inherit; }
 .card-actions { display: flex; align-items: center; gap: 11px; }
 .step-check { min-width: 104px; padding: 5px 8px; border: 1px solid #cbbba2; border-radius: 2px; background: transparent; color: #837562; cursor: pointer; font-size: 7px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; transition: border-color .2s, color .2s, background .2s; }
 .step-check:hover { border-color: var(--rust); color: var(--rust); }
+.search-step-toggle { min-width: 118px; padding: 5px 8px; border: 1px solid #cbbba2; border-radius: 2px; background: #fffaf0; color: #837562; cursor: pointer; font-size: 7px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; transition: border-color .2s, color .2s, background .2s; }
+.search-step-toggle:hover { border-color: var(--rust); color: var(--rust); }
+.search-step-toggle.is-checked { border-color: #8f9971; background: #e5e7d6; color: #626c4c; }
+.search-step-toggle:disabled { cursor: default; opacity: .8; }
 .formula { min-height: 62px; padding: 13px 17px; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .ingredient-chip,
 .formula button,
