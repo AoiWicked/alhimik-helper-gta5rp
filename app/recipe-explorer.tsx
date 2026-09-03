@@ -296,6 +296,10 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
   );
   const completedSteps = Math.min(activeProfile?.completedSteps ?? 0, walkthrough.steps.length);
   const hasLearnedTime = walkthrough.timeStepIndex >= 0 && completedSteps > walkthrough.timeStepIndex;
+  const manuallyOpenedKeys = useMemo(
+    () => new Set((activeProfile?.openedElements ?? []).map(normalize)),
+    [activeProfile?.openedElements],
+  );
   const progressedElementKeys = useMemo(() => {
     const opened = new Set(BASE_ELEMENTS.map(normalize));
     for (const step of walkthrough.steps.slice(0, completedSteps)) {
@@ -305,13 +309,15 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
   }, [completedSteps, walkthrough.steps]);
   const openedElementKeys = useMemo(() => {
     const opened = new Set(progressedElementKeys);
-    for (const element of activeProfile?.openedElements ?? []) {
-      opened.add(normalize(element));
-    }
+    for (const element of manuallyOpenedKeys) opened.add(element);
     return opened;
-  }, [activeProfile?.openedElements, progressedElementKeys]);
+  }, [manuallyOpenedKeys, progressedElementKeys]);
   const completedSearchSteps = path.filter((step) => openedElementKeys.has(normalize(step.result))).length;
-  const visibleCompleted = Math.min(completedSteps, visibleSteps.length);
+  const visibleCompleted = visibleSteps.reduce(
+    (total, step, index) =>
+      total + (index < completedSteps || manuallyOpenedKeys.has(normalize(step.result)) ? 1 : 0),
+    0,
+  );
   const progressPercent = visibleSteps.length
     ? Math.round((visibleCompleted / visibleSteps.length) * 100)
     : 0;
@@ -694,9 +700,7 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                   const isTime = step.ingredients.length === 0;
                   const isFinal = index === path.length - 1;
                   const isProgressOpened = progressedElementKeys.has(normalize(step.result));
-                  const isManuallyOpened = activeProfile?.openedElements.some(
-                    (element) => normalize(element) === normalize(step.result),
-                  ) ?? false;
+                  const isManuallyOpened = manuallyOpenedKeys.has(normalize(step.result));
                   const isKnown = openedElementKeys.has(normalize(step.result));
                   const style = { "--step-offset": `${offset}vw` } as CSSProperties;
 
@@ -787,7 +791,7 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                     ? "Прогресс пока не сохраняется"
                     : visibleCompleted >= visibleSteps.length
                     ? "Этот маршрут завершён"
-                    : `Следующий шаг: ${visibleCompleted + 1} из ${visibleSteps.length}`}
+                    : `Выполнено: ${visibleCompleted} из ${visibleSteps.length}`}
                 </strong>
               </div>
             </div>
@@ -831,8 +835,10 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
               const offset = (stairPosition <= 9 ? stairPosition : 18 - stairPosition) / 9 * 35;
               const style = { "--step-offset": `${offset}vw` } as CSSProperties;
               const isTime = step.ingredients.length === 0;
-              const isCompleted = index < completedSteps;
-              const isCurrent = index === completedSteps;
+              const isSequentiallyCompleted = index < completedSteps;
+              const isManuallyOpened = manuallyOpenedKeys.has(normalize(step.result));
+              const isCompleted = isSequentiallyCompleted || isManuallyOpened;
+              const isCurrent = index === completedSteps && !isManuallyOpened;
 
               return (
                 <div key={step.id}>
@@ -847,6 +853,8 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                         <span>
                           {isTime
                             ? "ВРЕМЯ ОТКРЫТО"
+                            : isManuallyOpened && !isSequentiallyCompleted
+                              ? `НАЙДЕНО В ПОИСКЕ · ${activeProfile?.name}`
                             : step.isNewElement
                               ? `НОВЫЙ ЭЛЕМЕНТ · ${step.unlockedCount}`
                               : "АЛЬТЕРНАТИВНЫЙ РЕЦЕПТ"}
@@ -856,10 +864,24 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                           <button
                             className="step-check"
                             type="button"
-                            onClick={() => setStepCompleted(index)}
-                            aria-label={isCompleted ? `Вернуться к шагу ${index + 1}` : `Отметить шаг ${index + 1} выполненным`}
+                            onClick={() => {
+                              if (isManuallyOpened && !isSequentiallyCompleted) {
+                                toggleOpenedElement(step.result);
+                              } else {
+                                setStepCompleted(index);
+                              }
+                            }}
+                            aria-label={isManuallyOpened && !isSequentiallyCompleted
+                              ? `Снять отметку с элемента ${step.result}`
+                              : isCompleted
+                                ? `Вернуться к шагу ${index + 1}`
+                                : `Отметить шаг ${index + 1} выполненным`}
                           >
-                            {isCompleted ? "✓ Выполнено" : "Отметить готовым"}
+                            {isManuallyOpened && !isSequentiallyCompleted
+                              ? "✓ Найдено в поиске"
+                              : isCompleted
+                                ? "✓ Выполнено"
+                                : "Отметить готовым"}
                           </button>
                         </div>
                       </div>
