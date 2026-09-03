@@ -290,6 +290,14 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
   );
   const completedSteps = Math.min(activeProfile?.completedSteps ?? 0, walkthrough.steps.length);
   const hasLearnedTime = walkthrough.timeStepIndex >= 0 && completedSteps > walkthrough.timeStepIndex;
+  const openedElementKeys = useMemo(() => {
+    const opened = new Set(BASE_ELEMENTS.map(normalize));
+    for (const step of walkthrough.steps.slice(0, completedSteps)) {
+      opened.add(normalize(step.result));
+    }
+    return opened;
+  }, [completedSteps, walkthrough.steps]);
+  const completedSearchSteps = path.filter((step) => openedElementKeys.has(normalize(step.result))).length;
   const visibleCompleted = Math.min(completedSteps, visibleSteps.length);
   const progressPercent = visibleSteps.length
     ? Math.round((visibleCompleted / visibleSteps.length) * 100)
@@ -617,6 +625,11 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                   {!hasLearnedTime && path.some((step) => step.ingredients.length === 0 && normalize(step.result) === normalize("Время")) && (
                     <p>В одном из рецептов требуется Время. Его полный маршрут вынесен отдельно и не добавляется в эту лестницу.</p>
                   )}
+                  {activeProfile && completedSearchSteps > 0 && (
+                    <p className="search-progress-summary">
+                      У персонажа «{activeProfile.name}» уже открыто {completedSearchSteps} из {path.length} шагов этой цепочки.
+                    </p>
+                  )}
                 </div>
                 <div className="steps-total"><strong>{path.length}</strong><span>шагов</span></div>
               </div>
@@ -634,14 +647,15 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                   const offset = (stairPosition <= 9 ? stairPosition : 18 - stairPosition) / 9 * 35;
                   const isTime = step.ingredients.length === 0;
                   const isFinal = index === path.length - 1;
+                  const isKnown = openedElementKeys.has(normalize(step.result));
                   const style = { "--step-offset": `${offset}vw` } as CSSProperties;
 
                   return (
-                    <article className={`recipe-step ${isFinal || isTime ? "is-final" : ""} ${isTime ? "time-unlock" : ""} ${isTime && hasLearnedTime ? "is-learned-time" : ""}`} style={style} key={step.id}>
-                      <div className="step-marker"><span>{isTime ? "✦" : String(index + 1).padStart(3, "0")}</span></div>
+                    <article className={`recipe-step ${isFinal || isTime ? "is-final" : ""} ${isTime ? "time-unlock" : ""} ${isKnown ? "is-completed" : ""} ${isTime && hasLearnedTime ? "is-learned-time" : ""}`} style={style} key={step.id}>
+                      <div className="step-marker"><span>{isKnown ? "✓" : isTime ? "✦" : String(index + 1).padStart(3, "0")}</span></div>
                       <div className="recipe-card">
                         <div className="card-meta">
-                          <span>{isTime ? (hasLearnedTime ? "ВЫ УЖЕ ВЫУЧИЛИ ВРЕМЯ" : "ТОЛЬКО НА 100 УРОВНЕ") : isFinal ? "ФИНАЛЬНЫЙ ШАГ" : `ШАГ ${index + 1}`}</span>
+                          <span>{isTime ? (hasLearnedTime ? "ВЫ УЖЕ ВЫУЧИЛИ ВРЕМЯ" : "ТОЛЬКО НА 100 УРОВНЕ") : isKnown ? `УЖЕ ОТКРЫТО · ${activeProfile?.name}` : isFinal ? "ФИНАЛЬНЫЙ ШАГ" : `ШАГ ${index + 1}`}</span>
                           <small>#{String(step.number).padStart(3, "0")}</small>
                         </div>
                         {isTime ? (

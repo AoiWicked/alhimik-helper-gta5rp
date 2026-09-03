@@ -215,6 +215,7 @@ button { color: inherit; }
 .path-heading { padding-bottom: 31px; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; border-bottom: 1px solid #d5c8b3; }
 .path-heading h2 { margin: 10px 0 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(31px, 4vw, 48px); font-weight: 500; letter-spacing: -.025em; }
 .path-heading p { max-width: 650px; margin: 9px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.path-heading .search-progress-summary { color: #68704f; font-weight: 700; }
 .steps-total { width: 78px; height: 78px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px solid #c6b28f; border-radius: 50%; background: rgba(255,255,255,.2); }
 .steps-total strong { color: var(--rust); font-family: Georgia, serif; font-size: 25px; font-weight: 500; line-height: 1; }
 .steps-total span { margin-top: 4px; color: var(--muted); font-size: 8px; letter-spacing: .09em; text-transform: uppercase; }
