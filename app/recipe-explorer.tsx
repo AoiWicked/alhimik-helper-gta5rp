@@ -92,11 +92,7 @@ function normalize(value: string) {
   return value.toLocaleLowerCase("ru-RU").replaceAll("ё", "е").trim();
 }
 
-function buildPath(
-  target: string,
-  recipes: Recipe[],
-  timePrerequisites: WalkthroughStep[],
-): PathStep[] {
+function buildPath(target: string, recipes: Recipe[]): PathStep[] {
   const byResult = new Map<string, Recipe[]>();
 
   for (const recipe of recipes) {
@@ -158,19 +154,7 @@ function buildPath(
 
   collect(target);
 
-  const needsTime = path.some(
-    (step) => step.ingredients.length === 0 && normalize(step.result) === normalize("Время"),
-  );
-  if (!needsTime) return path;
-
-  const safePath: PathStep[] = [];
-  const safeIds = new Set<string>();
-  for (const step of [...timePrerequisites, ...path]) {
-    if (safeIds.has(step.id)) continue;
-    safeIds.add(step.id);
-    safePath.push({ ...step, depth: "depth" in step ? step.depth : 0 });
-  }
-  return safePath;
+  return path;
 }
 
 function buildWalkthrough(recipes: Recipe[]): Walkthrough {
@@ -295,8 +279,8 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
       : elements;
   }, [catalogQuery, elements]);
   const path = useMemo(
-    () => (selected ? buildPath(selected, recipes, timeSteps) : []),
-    [recipes, selected, timeSteps],
+    () => (selected ? buildPath(selected, recipes) : []),
+    [recipes, selected],
   );
   const visibleSteps = view === "time" ? timeSteps : walkthrough.steps;
   const profilesSnapshot = useSyncExternalStore(subscribeToProfiles, getProfilesSnapshot, () => "");
@@ -317,6 +301,15 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
     setSearchOpen(false);
     setCatalogOpen(false);
     setView("search");
+  }
+
+  function openTimeRoute() {
+    setSearchOpen(false);
+    setCatalogOpen(false);
+    setView("time");
+    window.setTimeout(() => {
+      document.querySelector(".journey")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
   }
 
   function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -621,8 +614,8 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                 <div>
                   <span className="eyebrow">ПУТЬ СОЗДАНИЯ</span>
                   <h2>Как создать «{selected}»</h2>
-                  {path.some((step) => step.ingredients.length === 0 && normalize(step.result) === normalize("Время")) && (
-                    <p>Маршрут сначала открывает Время и только после этого использует его в рецептах.</p>
+                  {!hasLearnedTime && path.some((step) => step.ingredients.length === 0 && normalize(step.result) === normalize("Время")) && (
+                    <p>В одном из рецептов требуется Время. Его полный маршрут вынесен отдельно и не добавляется в эту лестницу.</p>
                   )}
                 </div>
                 <div className="steps-total"><strong>{path.length}</strong><span>шагов</span></div>
@@ -653,9 +646,14 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                         </div>
                         {isTime ? (
                           <div className="unlock-formula">
-                            <span>{hasLearnedTime ? `Открыто персонажем «${activeProfile?.name}»` : "Открывается только после 100 элементов"}</span>
+                            <span>{hasLearnedTime ? `Открыто персонажем «${activeProfile?.name}»` : "Требуется для следующих рецептов"}</span>
                             <strong><HourglassIcon /> {step.result}</strong>
-                            <small>{hasLearnedTime ? "Можно использовать в следующих рецептах" : step.note ?? "Дополнительная комбинация не нужна"}</small>
+                            <small>{hasLearnedTime ? "Можно использовать в следующих рецептах" : "Время открывается после получения 100 элементов"}</small>
+                            {!hasLearnedTime && (
+                              <button className="time-route-link" type="button" onClick={openTimeRoute}>
+                                Открыть маршрут до Времени →
+                              </button>
+                            )}
                           </div>
                         ) : (
                           <div className="formula">

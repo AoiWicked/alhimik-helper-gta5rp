@@ -269,6 +269,8 @@ button { color: inherit; }
 .unlock-formula strong { display: inline-flex; align-items: center; gap: 7px; color: var(--rust); font-family: Georgia, serif; font-size: 21px; font-weight: 500; }
 .unlock-formula strong svg { width: 19px; fill: none; stroke: currentColor; stroke-width: 1.4; }
 .unlock-formula small { grid-column: 1 / -1; color: #8d7f6d; font-size: 10px; }
+.time-route-link { grid-column: 1 / -1; width: fit-content; margin-top: 7px; padding: 8px 12px; border: 1px solid var(--rust); border-radius: 2px; background: var(--rust); color: #fff9ef; cursor: pointer; font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.time-route-link:hover { background: var(--rust-dark); }
 
 .phase-divider { width: min(570px, 100%); margin: 42px auto 48px; padding: 15px 24px; display: flex; align-items: center; justify-content: center; gap: 18px; border-top: 1px solid #c9b995; border-bottom: 1px solid #c9b995; color: var(--rust); text-align: center; }
 .phase-divider div { display: flex; flex-direction: column; gap: 4px; }
