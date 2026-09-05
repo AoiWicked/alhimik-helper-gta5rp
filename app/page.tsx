@@ -11,12 +11,14 @@ function parseRecipes(source: string): Recipe[] {
       const recipe = line.match(/^\s*(\d+)\.\s*(.+?)\s*\+\s*(.+?)\s*=\s*(.+?)\s*$/);
       if (!recipe) return [];
 
+      const result = recipe[4].trim();
       return [
         {
           id: `recipe-${index}`,
           number: Number(recipe[1]),
           ingredients: [recipe[2].trim(), recipe[3].trim()] as [string, string],
-          result: recipe[4].trim(),
+          result,
+          outputs: result.split(/\s*\+\s*/).map((output) => output.trim()),
         },
       ];
     });

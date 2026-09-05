@@ -15,6 +15,7 @@ export type Recipe = {
     number: number;
     ingredients: [string, string];
     result: string;
+    outputs: string[];
 };
 
 type WalkthroughStep = Recipe & {
@@ -75,13 +76,17 @@ function parseProfiles(snapshot: string): ProfileStore {
                           typeof profile?.completedSteps === "number",
                   )
                   .map((profile) => ({
-                      ...profile,
-                      openedElements: Array.isArray(profile.openedElements)
-                          ? profile.openedElements.filter(
-                                (element): element is string =>
-                                    typeof element === "string",
-                            )
-                          : [],
+            ...profile,
+            openedElements: Array.isArray(profile.openedElements)
+                ? profile.openedElements
+                      .filter(
+                          (element): element is string =>
+                              typeof element === "string",
+                      )
+                      .flatMap((element) =>
+                          element.split(/\s*\+\s*/).map((part) => part.trim()),
+                      )
+                : [],
                   }))
             : [];
         const activeProfileId = profiles.some(
@@ -104,12 +109,18 @@ function normalize(value: string) {
     return value.toLocaleLowerCase("ru-RU").replaceAll("ё", "е").trim();
 }
 
+function recipeOutputs(recipe: Recipe) {
+    return recipe.outputs.length ? recipe.outputs : [recipe.result];
+}
+
 function buildPath(target: string, recipes: Recipe[]): PathStep[] {
     const byResult = new Map<string, Recipe[]>();
 
     for (const recipe of recipes) {
-        const key = normalize(recipe.result);
-        byResult.set(key, [...(byResult.get(key) ?? []), recipe]);
+        for (const output of recipeOutputs(recipe)) {
+            const key = normalize(output);
+            byResult.set(key, [...(byResult.get(key) ?? []), recipe]);
+        }
     }
 
     type Solution = { recipe: Recipe | null; cost: number; depth: number };
@@ -174,16 +185,16 @@ function buildWalkthrough(recipes: Recipe[]): Walkthrough {
     let timeStepIndex = -1;
 
     function appendRecipe(recipe: Recipe) {
-        const resultKey = normalize(recipe.result);
-        const isNewElement = !known.has(resultKey);
-        if (isNewElement) known.add(resultKey);
+        const outputs = recipeOutputs(recipe);
+        const isNewElement = outputs.some((output) => !known.has(normalize(output)));
+        for (const output of outputs) known.add(normalize(output));
 
         steps.push({
             ...recipe,
             unlockedCount: known.size,
             isNewElement,
         });
-        if (resultKey === normalize("Время")) {
+        if (outputs.some((output) => normalize(output) === normalize("Время"))) {
             timeStepIndex = steps.length - 1;
         }
     }
@@ -272,8 +283,11 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
     const elements = useMemo(() => {
         const unique = new Map<string, string>();
         for (const base of BASE_ELEMENTS) unique.set(normalize(base), base);
-        for (const recipe of recipes)
-            unique.set(normalize(recipe.result), recipe.result);
+        for (const recipe of recipes) {
+            for (const output of recipeOutputs(recipe)) {
+                unique.set(normalize(output), output);
+            }
+        }
         return [...unique.values()].sort((a, b) => a.localeCompare(b, "ru"));
     }, [recipes]);
     const filteredElements = useMemo(() => {
@@ -297,6 +311,9 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
     const path = useMemo(
         () => (selected ? buildPath(selected, recipes) : []),
         [recipes, selected],
+    );
+    const selectedIsBase = BASE_ELEMENTS.some(
+        (element) => normalize(element) === normalize(selected),
     );
     const visibleSteps = view === "time" ? timeSteps : walkthrough.steps;
     const profilesSnapshot = useSyncExternalStore(
@@ -326,7 +343,9 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
     const progressedElementKeys = useMemo(() => {
         const opened = new Set(BASE_ELEMENTS.map(normalize));
         for (const step of walkthrough.steps.slice(0, completedSteps)) {
-            opened.add(normalize(step.result));
+            for (const output of recipeOutputs(step)) {
+                opened.add(normalize(output));
+            }
         }
         return opened;
     }, [completedSteps, walkthrough.steps]);
@@ -336,13 +355,17 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
         return opened;
     }, [manuallyOpenedKeys, progressedElementKeys]);
     const completedSearchSteps = path.filter((step) =>
-        openedElementKeys.has(normalize(step.result)),
+        recipeOutputs(step).every((output) =>
+            openedElementKeys.has(normalize(output)),
+        ),
     ).length;
     const visibleCompleted = visibleSteps.reduce(
         (total, step, index) =>
             total +
             (index < completedSteps ||
-            manuallyOpenedKeys.has(normalize(step.result))
+            recipeOutputs(step).every((output) =>
+                manuallyOpenedKeys.has(normalize(output)),
+            )
                 ? 1
                 : 0),
         0,
@@ -381,21 +404,32 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
         });
     }
 
-    function toggleOpenedElement(element: string) {
+    function toggleOpenedRecipe(recipe: Recipe) {
         if (!activeProfile) {
             setProfileCreatorOpen(true);
             return;
         }
 
-        const elementKey = normalize(element);
-        const isManuallyOpened = activeProfile.openedElements.some(
-            (opened) => normalize(opened) === elementKey,
+        const outputKeys = new Set(recipeOutputs(recipe).map(normalize));
+        const isManuallyOpened = [...outputKeys].every((outputKey) =>
+            activeProfile.openedElements.some(
+                (opened) => normalize(opened) === outputKey,
+            ),
         );
         const openedElements = isManuallyOpened
             ? activeProfile.openedElements.filter(
-                  (opened) => normalize(opened) !== elementKey,
+                  (opened) => !outputKeys.has(normalize(opened)),
               )
-            : [...activeProfile.openedElements, element];
+            : [
+                  ...activeProfile.openedElements,
+                  ...recipeOutputs(recipe).filter(
+                      (output) =>
+                          !activeProfile.openedElements.some(
+                              (opened) =>
+                                  normalize(opened) === normalize(output),
+                          ),
+                  ),
+              ];
 
         saveProfiles({
             ...profileStore,
@@ -816,7 +850,7 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                 )}
                             </div>
                         </div>
-                    ) : path.length === 0 ? (
+                    ) : path.length === 0 && selectedIsBase ? (
                         <div className="base-result">
                             <span className="eyebrow">БАЗОВАЯ СТИХИЯ</span>
                             <div className="base-symbol">✦</div>
@@ -824,6 +858,25 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                             <p>
                                 Она доступна с самого начала — создавать её не
                                 нужно.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSelected("");
+                                    setQuery("");
+                                }}
+                            >
+                                Искать другой элемент
+                            </button>
+                        </div>
+                    ) : path.length === 0 ? (
+                        <div className="base-result path-error">
+                            <span className="eyebrow">ЦЕПОЧКА НЕ НАЙДЕНА</span>
+                            <div className="base-symbol">!</div>
+                            <h2>{selected}</h2>
+                            <p>
+                                Для этого элемента в данных не хватает одного
+                                из предыдущих рецептов.
                             </p>
                             <button
                                 type="button"
@@ -880,19 +933,29 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                             9) *
                                         35;
                                     const isTime =
-                                        normalize(step.result) ===
-                                        normalize("Время");
+                                        recipeOutputs(step).some(
+                                            (output) =>
+                                                normalize(output) ===
+                                                normalize("Время"),
+                                        );
                                     const isFinal = index === path.length - 1;
                                     const isProgressOpened =
-                                        progressedElementKeys.has(
-                                            normalize(step.result),
+                                        recipeOutputs(step).every((output) =>
+                                            progressedElementKeys.has(
+                                                normalize(output),
+                                            ),
                                         );
                                     const isManuallyOpened =
-                                        manuallyOpenedKeys.has(
-                                            normalize(step.result),
+                                        recipeOutputs(step).every((output) =>
+                                            manuallyOpenedKeys.has(
+                                                normalize(output),
+                                            ),
                                         );
-                                    const isKnown = openedElementKeys.has(
-                                        normalize(step.result),
+                                    const isKnown = recipeOutputs(step).every(
+                                        (output) =>
+                                            openedElementKeys.has(
+                                                normalize(output),
+                                            ),
                                     );
                                     const style = {
                                         "--step-offset": `${offset}vw`,
@@ -938,9 +1001,9 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                                         <button
                                                             className={`search-step-toggle ${isKnown ? "is-checked" : ""}`}
                                                             type="button"
-                                                            onClick={() =>
-                                                                toggleOpenedElement(
-                                                                    step.result,
+                                                                onClick={() =>
+                                                                toggleOpenedRecipe(
+                                                                    step,
                                                                 )
                                                             }
                                                             disabled={
@@ -1150,11 +1213,17 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                     "--step-offset": `${offset}vw`,
                                 } as CSSProperties;
                                 const isTime =
-                                    normalize(step.result) === normalize("Время");
+                                    recipeOutputs(step).some(
+                                        (output) =>
+                                            normalize(output) ===
+                                            normalize("Время"),
+                                    );
                                 const isSequentiallyCompleted =
                                     index < completedSteps;
-                                const isManuallyOpened = manuallyOpenedKeys.has(
-                                    normalize(step.result),
+                                const isManuallyOpened = recipeOutputs(
+                                    step,
+                                ).every((output) =>
+                                    manuallyOpenedKeys.has(normalize(output)),
                                 );
                                 const isCompleted =
                                     isSequentiallyCompleted || isManuallyOpened;
@@ -1207,8 +1276,8 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                                                     isManuallyOpened &&
                                                                     !isSequentiallyCompleted
                                                                 ) {
-                                                                    toggleOpenedElement(
-                                                                        step.result,
+                                                                    toggleOpenedRecipe(
+                                                                        step,
                                                                     );
                                                                 } else {
                                                                     setStepCompleted(
