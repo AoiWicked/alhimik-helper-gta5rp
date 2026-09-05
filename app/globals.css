@@ -276,13 +276,6 @@ button { color: inherit; }
 .recipe-step.is-learned-time .step-marker::before { border-color: #788260; background: #788260; }
 .recipe-step.is-learned-time .card-meta, .recipe-step.is-learned-time .step-marker span { color: #fff; }
 .recipe-step.is-learned-time .card-meta { background: #788260; }
-.unlock-formula { min-height: 78px; padding: 14px 17px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 14px; }
-.unlock-formula > span { color: var(--muted); font-family: Georgia, serif; font-size: 13px; font-style: italic; }
-.unlock-formula strong { display: inline-flex; align-items: center; gap: 7px; color: var(--rust); font-family: Georgia, serif; font-size: 21px; font-weight: 500; }
-.unlock-formula strong svg { width: 19px; fill: none; stroke: currentColor; stroke-width: 1.4; }
-.unlock-formula small { grid-column: 1 / -1; color: #8d7f6d; font-size: 10px; }
-.time-route-link { grid-column: 1 / -1; width: fit-content; margin-top: 7px; padding: 8px 12px; border: 1px solid var(--rust); border-radius: 2px; background: var(--rust); color: #fff9ef; cursor: pointer; font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-.time-route-link:hover { background: var(--rust-dark); }
 
 .phase-divider { width: min(570px, 100%); margin: 42px auto 48px; padding: 15px 24px; display: flex; align-items: center; justify-content: center; gap: 18px; border-top: 1px solid #c9b995; border-bottom: 1px solid #c9b995; color: var(--rust); text-align: center; }
 .phase-divider div { display: flex; flex-direction: column; gap: 4px; }
@@ -362,8 +355,6 @@ footer span { color: #b48035; font-size: 9px; }
   .card-meta { align-items: flex-start; flex-direction: column; padding-block: 8px; }
   .card-actions { width: 100%; justify-content: space-between; }
   .ingredient-chip, .formula strong { padding: 7px 8px; font-size: 12px; }
-  .unlock-formula { grid-template-columns: 1fr; }
-  .unlock-formula small { grid-column: auto; }
   .profile-dialog { padding-inline: 25px; }
 }
 

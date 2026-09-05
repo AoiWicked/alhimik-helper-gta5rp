@@ -13,9 +13,8 @@ import {
 export type Recipe = {
     id: string;
     number: number;
-    ingredients: [] | [string, string];
+    ingredients: [string, string];
     result: string;
-    note?: string;
 };
 
 type WalkthroughStep = Recipe & {
@@ -132,12 +131,6 @@ function buildPath(target: string, recipes: Recipe[]): PathStep[] {
         const nextVisiting = new Set(visiting).add(key);
 
         for (const recipe of candidates) {
-            if (recipe.ingredients.length === 0) {
-                const solution = { recipe, cost: 1, depth: 1 };
-                if (!best || solution.cost < best.cost) best = solution;
-                continue;
-            }
-
             const left = solve(recipe.ingredients[0], nextVisiting);
             const right = solve(recipe.ingredients[1], nextVisiting);
             if (!left || !right) continue;
@@ -176,40 +169,11 @@ function buildPath(target: string, recipes: Recipe[]): PathStep[] {
 
 function buildWalkthrough(recipes: Recipe[]): Walkthrough {
     const known = new Set(BASE_ELEMENTS.map(normalize));
-    const unlockRecipe = recipes.find(
-        (recipe) =>
-            recipe.ingredients.length === 0 &&
-            normalize(recipe.result) === normalize("Время"),
-    );
-    const pending = recipes.filter((recipe) => recipe.ingredients.length > 0);
+    const pending = [...recipes];
     const steps: WalkthroughStep[] = [];
     let timeStepIndex = -1;
 
-    while (pending.length > 0) {
-        if (
-            !known.has(normalize("Время")) &&
-            known.size >= 100 &&
-            unlockRecipe
-        ) {
-            known.add(normalize("Время"));
-            steps.push({
-                ...unlockRecipe,
-                unlockedCount: known.size,
-                isNewElement: true,
-            });
-            timeStepIndex = steps.length - 1;
-            continue;
-        }
-
-        const nextIndex = pending.findIndex((recipe) =>
-            recipe.ingredients.every((ingredient) =>
-                known.has(normalize(ingredient)),
-            ),
-        );
-
-        if (nextIndex === -1) break;
-
-        const [recipe] = pending.splice(nextIndex, 1);
+    function appendRecipe(recipe: Recipe) {
         const resultKey = normalize(recipe.result);
         const isNewElement = !known.has(resultKey);
         if (isNewElement) known.add(resultKey);
@@ -219,6 +183,32 @@ function buildWalkthrough(recipes: Recipe[]): Walkthrough {
             unlockedCount: known.size,
             isNewElement,
         });
+        if (resultKey === normalize("Время")) {
+            timeStepIndex = steps.length - 1;
+        }
+    }
+
+    const timePath = buildPath("Время", recipes);
+    for (const pathRecipe of timePath) {
+        const pendingIndex = pending.findIndex(
+            (recipe) => recipe.id === pathRecipe.id,
+        );
+        if (pendingIndex === -1) continue;
+        const [recipe] = pending.splice(pendingIndex, 1);
+        appendRecipe(recipe);
+    }
+
+    while (pending.length > 0) {
+        const nextIndex = pending.findIndex((recipe) =>
+            recipe.ingredients.every((ingredient) =>
+                known.has(normalize(ingredient)),
+            ),
+        );
+
+        if (nextIndex === -1) break;
+
+        const [recipe] = pending.splice(nextIndex, 1);
+        appendRecipe(recipe);
     }
 
     return {
@@ -325,13 +315,14 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
         activeProfile?.completedSteps ?? 0,
         walkthrough.steps.length,
     );
-    const hasLearnedTime =
-        walkthrough.timeStepIndex >= 0 &&
-        completedSteps > walkthrough.timeStepIndex;
     const manuallyOpenedKeys = useMemo(
         () => new Set((activeProfile?.openedElements ?? []).map(normalize)),
         [activeProfile?.openedElements],
     );
+    const hasLearnedTime =
+        (walkthrough.timeStepIndex >= 0 &&
+            completedSteps > walkthrough.timeStepIndex) ||
+        manuallyOpenedKeys.has(normalize("Время"));
     const progressedElementKeys = useMemo(() => {
         const opened = new Set(BASE_ELEMENTS.map(normalize));
         for (const step of walkthrough.steps.slice(0, completedSteps)) {
@@ -366,17 +357,6 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
         setSearchOpen(false);
         setCatalogOpen(false);
         setView("search");
-    }
-
-    function openTimeRoute() {
-        setSearchOpen(false);
-        setCatalogOpen(false);
-        setView("time");
-        window.setTimeout(() => {
-            document
-                .querySelector(".journey")
-                ?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 0);
     }
 
     function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -769,7 +749,7 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                     >
                         <HourglassIcon />
                         <span>
-                            <small>БЫСТРАЯ ЦЕЛЬ</small>До открытия Времени
+                            <small>БЫСТРАЯ ЦЕЛЬ</small>До создания Времени
                         </span>
                         <strong>{timeSteps.length} ступеней</strong>
                     </button>
@@ -863,20 +843,6 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                         ПУТЬ СОЗДАНИЯ
                                     </span>
                                     <h2>Как создать «{selected}»</h2>
-                                    {!hasLearnedTime &&
-                                        path.some(
-                                            (step) =>
-                                                step.ingredients.length === 0 &&
-                                                normalize(step.result) ===
-                                                    normalize("Время"),
-                                        ) && (
-                                            <p>
-                                                В одном из рецептов требуется
-                                                Время. Его полный маршрут
-                                                вынесен отдельно и не
-                                                добавляется в эту лестницу.
-                                            </p>
-                                        )}
                                     {activeProfile &&
                                         completedSearchSteps > 0 && (
                                             <p className="search-progress-summary">
@@ -914,7 +880,8 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                             9) *
                                         35;
                                     const isTime =
-                                        step.ingredients.length === 0;
+                                        normalize(step.result) ===
+                                        normalize("Время");
                                     const isFinal = index === path.length - 1;
                                     const isProgressOpened =
                                         progressedElementKeys.has(
@@ -953,8 +920,8 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                                     <span>
                                                         {isTime
                                                             ? hasLearnedTime
-                                                                ? "ВЫ УЖЕ ВЫУЧИЛИ ВРЕМЯ"
-                                                                : "ТОЛЬКО НА 100 УРОВНЕ"
+                                                                ? "ВЫ УЖЕ СОЗДАЛИ ВРЕМЯ"
+                                                                : "СОЗДАНИЕ ВРЕМЕНИ"
                                                             : isKnown
                                                               ? `УЖЕ ОТКРЫТО · ${activeProfile?.name}`
                                                               : isFinal
@@ -968,63 +935,31 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                                                 step.number,
                                                             ).padStart(3, "0")}
                                                         </small>
-                                                        {!isTime && (
-                                                            <button
-                                                                className={`search-step-toggle ${isKnown ? "is-checked" : ""}`}
-                                                                type="button"
-                                                                onClick={() =>
-                                                                    toggleOpenedElement(
-                                                                        step.result,
-                                                                    )
-                                                                }
-                                                                disabled={
-                                                                    isProgressOpened &&
-                                                                    !isManuallyOpened
-                                                                }
-                                                                aria-pressed={
-                                                                    isManuallyOpened
-                                                                }
-                                                            >
-                                                                {isManuallyOpened
-                                                                    ? "✓ Найдено"
-                                                                    : isProgressOpened
-                                                                      ? "✓ Открыто в маршруте"
-                                                                      : "Отметить найденным"}
-                                                            </button>
-                                                        )}
+                                                        <button
+                                                            className={`search-step-toggle ${isKnown ? "is-checked" : ""}`}
+                                                            type="button"
+                                                            onClick={() =>
+                                                                toggleOpenedElement(
+                                                                    step.result,
+                                                                )
+                                                            }
+                                                            disabled={
+                                                                isProgressOpened &&
+                                                                !isManuallyOpened
+                                                            }
+                                                            aria-pressed={
+                                                                isManuallyOpened
+                                                            }
+                                                        >
+                                                            {isManuallyOpened
+                                                                ? "✓ Найдено"
+                                                                : isProgressOpened
+                                                                  ? "✓ Открыто в маршруте"
+                                                                  : "Отметить найденным"}
+                                                        </button>
                                                     </div>
                                                 </div>
-                                                {isTime ? (
-                                                    <div className="unlock-formula">
-                                                        <span>
-                                                            {hasLearnedTime
-                                                                ? `Открыто персонажем «${activeProfile?.name}»`
-                                                                : "Требуется для следующих рецептов"}
-                                                        </span>
-                                                        <strong>
-                                                            <HourglassIcon />{" "}
-                                                            {step.result}
-                                                        </strong>
-                                                        <small>
-                                                            {hasLearnedTime
-                                                                ? "Можно использовать в следующих рецептах"
-                                                                : "Время открывается после получения 100 элементов"}
-                                                        </small>
-                                                        {!hasLearnedTime && (
-                                                            <button
-                                                                className="time-route-link"
-                                                                type="button"
-                                                                onClick={
-                                                                    openTimeRoute
-                                                                }
-                                                            >
-                                                                Открыть маршрут
-                                                                до Времени →
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                ) : (
-                                                    <div className="formula">
+                                                <div className="formula">
                                                         <button
                                                             type="button"
                                                             onClick={() =>
@@ -1062,8 +997,7 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                                         <strong>
                                                             {step.result}
                                                         </strong>
-                                                    </div>
-                                                )}
+                                                </div>
                                             </div>
                                         </article>
                                     );
@@ -1099,8 +1033,8 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                             >
                                 <span>02</span>
                                 <div>
-                                    <small>100 ЭЛЕМЕНТОВ</small>
-                                    <strong>Открыть Время</strong>
+                                    <small>СОЛНЦЕ + ЛУНА</small>
+                                    <strong>Создать Время</strong>
                                 </div>
                             </div>
                             <i />
@@ -1178,12 +1112,12 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                 </span>
                                 <h2>
                                     {view === "time"
-                                        ? "Первые сто элементов"
+                                        ? "Солнце и Луна"
                                         : "Все рецепты по порядку"}
                                 </h2>
                                 <p>
                                     {view === "time"
-                                        ? "После сотого уникального элемента Время откроется автоматически отдельной ступенью."
+                                        ? "Создай Солнце и Луну, затем соедини их, чтобы получить Время."
                                         : "Маршрут включает новые элементы и альтернативные рецепты из всего справочника."}
                                 </p>
                             </div>
@@ -1215,7 +1149,8 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                 const style = {
                                     "--step-offset": `${offset}vw`,
                                 } as CSSProperties;
-                                const isTime = step.ingredients.length === 0;
+                                const isTime =
+                                    normalize(step.result) === normalize("Время");
                                 const isSequentiallyCompleted =
                                     index < completedSteps;
                                 const isManuallyOpened = manuallyOpenedKeys.has(
@@ -1249,7 +1184,7 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                                 <div className="card-meta">
                                                     <span>
                                                         {isTime
-                                                            ? "ВРЕМЯ ОТКРЫТО"
+                                                            ? "ВРЕМЯ СОЗДАНО"
                                                             : isManuallyOpened &&
                                                                 !isSequentiallyCompleted
                                                               ? `НАЙДЕНО В ПОИСКЕ · ${activeProfile?.name}`
@@ -1300,25 +1235,7 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                                     </div>
                                                 </div>
 
-                                                {isTime ? (
-                                                    <div className="unlock-formula">
-                                                        <span>
-                                                            Автоматически после
-                                                            100 элементов
-                                                        </span>
-                                                        <strong>
-                                                            <HourglassIcon />{" "}
-                                                            Время
-                                                        </strong>
-                                                        <small>
-                                                            Только с этой
-                                                            ступени разрешены
-                                                            рецепты, где
-                                                            используется Время.
-                                                        </small>
-                                                    </div>
-                                                ) : (
-                                                    <div className="formula">
+                                                <div className="formula">
                                                         <span className="ingredient-chip">
                                                             {
                                                                 step
@@ -1340,8 +1257,7 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                                         <strong>
                                                             {step.result}
                                                         </strong>
-                                                    </div>
-                                                )}
+                                                </div>
                                             </div>
                                         </article>
 
@@ -1353,7 +1269,7 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                                     <div>
                                                         <small>ЭТАП II</small>
                                                         <strong>
-                                                            Время уже открыто —
+                                                            Время уже создано —
                                                             продолжаем путь
                                                         </strong>
                                                     </div>
@@ -1375,7 +1291,7 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
                                 </small>
                                 <strong>
                                     {view === "time"
-                                        ? "Время открыто!"
+                                        ? "Время создано!"
                                         : "Все рецепты открыты!"}
                                 </strong>
                             </div>

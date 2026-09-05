@@ -8,22 +8,6 @@ function parseRecipes(source: string): Recipe[] {
     .map((line) => line.trim())
     .filter(Boolean)
     .flatMap<Recipe>((line, index) => {
-      const unlock = line.match(
-        /^(\d+)\.\s*ОТКРЫТИЕ\s+(.+?)\s*\((.+)\)\s*$/i,
-      );
-
-      if (unlock) {
-        return [
-          {
-            id: `unlock-${index}`,
-            number: Number(unlock[1]),
-            ingredients: [],
-            result: unlock[2].trim(),
-            note: unlock[3].trim(),
-          },
-        ];
-      }
-
       const recipe = line.match(/^\s*(\d+)\.\s*(.+?)\s*\+\s*(.+?)\s*=\s*(.+?)\s*$/);
       if (!recipe) return [];
 
