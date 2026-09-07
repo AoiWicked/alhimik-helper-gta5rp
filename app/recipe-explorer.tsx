@@ -113,15 +113,9 @@ function recipeOutputs(recipe: Recipe) {
     return recipe.outputs.length ? recipe.outputs : [recipe.result];
 }
 
-function buildPath(
-    target: string,
-    recipes: Recipe[],
-    availableElements: Iterable<string> = BASE_ELEMENTS,
-): PathStep[] {
+function buildPath(target: string, recipes: Recipe[]): PathStep[] {
     const byResult = new Map<string, Recipe[]>();
-    const available = new Set(
-        [...BASE_ELEMENTS, ...availableElements].map(normalize),
-    );
+    const available = new Set(BASE_ELEMENTS.map(normalize));
 
     for (const recipe of recipes) {
         for (const output of recipeOutputs(recipe)) {
@@ -354,12 +348,10 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
         for (const element of manuallyOpenedKeys) opened.add(element);
         return opened;
     }, [manuallyOpenedKeys, progressedElementKeys]);
-    const path = useMemo(() => {
-        if (!selected) return [];
-        const availableForPath = new Set(openedElementKeys);
-        availableForPath.delete(normalize(selected));
-        return buildPath(selected, recipes, availableForPath);
-    }, [openedElementKeys, recipes, selected]);
+    const path = useMemo(
+        () => (selected ? buildPath(selected, recipes) : []),
+        [recipes, selected],
+    );
     const selectedIsBase = BASE_ELEMENTS.some(
         (element) => normalize(element) === normalize(selected),
     );
