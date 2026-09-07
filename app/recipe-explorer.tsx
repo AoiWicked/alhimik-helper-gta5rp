@@ -113,8 +113,15 @@ function recipeOutputs(recipe: Recipe) {
     return recipe.outputs.length ? recipe.outputs : [recipe.result];
 }
 
-function buildPath(target: string, recipes: Recipe[]): PathStep[] {
+function buildPath(
+    target: string,
+    recipes: Recipe[],
+    availableElements: Iterable<string> = BASE_ELEMENTS,
+): PathStep[] {
     const byResult = new Map<string, Recipe[]>();
+    const available = new Set(
+        [...BASE_ELEMENTS, ...availableElements].map(normalize),
+    );
 
     for (const recipe of recipes) {
         for (const output of recipeOutputs(recipe)) {
@@ -123,7 +130,7 @@ function buildPath(target: string, recipes: Recipe[]): PathStep[] {
         }
     }
 
-    type Solution = { recipe: Recipe | null; cost: number; depth: number };
+    type Solution = { steps: Recipe[]; cost: number; depth: number };
     const memo = new Map<string, Solution>();
 
     function solve(
@@ -131,8 +138,8 @@ function buildPath(target: string, recipes: Recipe[]): PathStep[] {
         visiting = new Set<string>(),
     ): Solution | null {
         const key = normalize(element);
-        if (BASE_ELEMENTS.some((base) => normalize(base) === key)) {
-            return { recipe: null, cost: 0, depth: 0 };
+        if (available.has(key)) {
+            return { steps: [], cost: 0, depth: 0 };
         }
         if (memo.has(key)) return memo.get(key)!;
         if (visiting.has(key)) return null;
@@ -146,36 +153,36 @@ function buildPath(target: string, recipes: Recipe[]): PathStep[] {
             const right = solve(recipe.ingredients[1], nextVisiting);
             if (!left || !right) continue;
 
+            const recipeIds = new Set<string>();
+            const steps: Recipe[] = [];
+            for (const step of [...left.steps, ...right.steps, recipe]) {
+                if (recipeIds.has(step.id)) continue;
+                recipeIds.add(step.id);
+                steps.push(step);
+            }
             const solution = {
-                recipe,
-                cost: left.cost + right.cost + 1,
+                steps,
+                cost: steps.length,
                 depth: Math.max(left.depth, right.depth) + 1,
             };
-            if (!best || solution.cost < best.cost) best = solution;
+            if (
+                !best ||
+                solution.cost < best.cost ||
+                (solution.cost === best.cost && solution.depth < best.depth)
+            ) {
+                best = solution;
+            }
         }
 
         if (best) memo.set(key, best);
         return best;
     }
 
-    const path: PathStep[] = [];
-    const added = new Set<string>();
-
-    function collect(element: string) {
-        const solution = solve(element);
-        if (!solution?.recipe) return;
-
-        for (const ingredient of solution.recipe.ingredients)
-            collect(ingredient);
-        if (!added.has(solution.recipe.id)) {
-            added.add(solution.recipe.id);
-            path.push({ ...solution.recipe, depth: solution.depth });
-        }
-    }
-
-    collect(target);
-
-    return path;
+    const solution = solve(target);
+    return (solution?.steps ?? []).map((recipe, index) => ({
+        ...recipe,
+        depth: index + 1,
+    }));
 }
 
 function buildWalkthrough(recipes: Recipe[]): Walkthrough {
@@ -308,13 +315,6 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
             ? elements.filter((element) => normalize(element).includes(needle))
             : elements;
     }, [catalogQuery, elements]);
-    const path = useMemo(
-        () => (selected ? buildPath(selected, recipes) : []),
-        [recipes, selected],
-    );
-    const selectedIsBase = BASE_ELEMENTS.some(
-        (element) => normalize(element) === normalize(selected),
-    );
     const visibleSteps = view === "time" ? timeSteps : walkthrough.steps;
     const profilesSnapshot = useSyncExternalStore(
         subscribeToProfiles,
@@ -354,6 +354,15 @@ export default function RecipeExplorer({ recipes }: { recipes: Recipe[] }) {
         for (const element of manuallyOpenedKeys) opened.add(element);
         return opened;
     }, [manuallyOpenedKeys, progressedElementKeys]);
+    const path = useMemo(() => {
+        if (!selected) return [];
+        const availableForPath = new Set(openedElementKeys);
+        availableForPath.delete(normalize(selected));
+        return buildPath(selected, recipes, availableForPath);
+    }, [openedElementKeys, recipes, selected]);
+    const selectedIsBase = BASE_ELEMENTS.some(
+        (element) => normalize(element) === normalize(selected),
+    );
     const completedSearchSteps = path.filter((step) =>
         recipeOutputs(step).every((output) =>
             openedElementKeys.has(normalize(output)),
